@@ -1,0 +1,240 @@
+/*******************************************************************************************
+  SIMPL+ Module Information
+  (Fill in comments below)
+*******************************************************************************************/
+/*
+Dealer Name:Archer Systems
+System Name: Boxee
+System Number: 0.1
+Programmer: TAM
+Comments:
+	
+	(c) 2009 Tom Miller    
+
+	This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+/////////////////////Compiler Directives
+#PRINT_TO_TRACE
+#OUTPUT_SHIFT 5
+#ENABLE_DYNAMIC
+#DEFAULT_VOLATILE
+#ENABLE_STACK_CHECKING
+#ENABLE_TRACE
+
+
+/////////////// Inputs & Outputs
+DIGITAL_INPUT _SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_;
+DIGITAL_INPUT TCPIP_Connect;    //you must hold this high constantly for the module to work. Do not pulse it.
+digital_OUTPUT TCPIP_Connected;
+ANALOG_OUTPUT TCPIP_Status;
+DIGITAL_INPUT  pause, stop, playNext, playPrev;
+digital_input up, dn, lt, rt, ok, back; 
+
+/*  DOCUMENTATION         
+
+http://xbmc.org/wiki/?title=WebServerHTTP-API
+
+http://xbmc.org/wiki/?title=The_Web_Interface
+
+
+Below is a partial list of the commands for media playback:
+
+Command 	Description 
+
+GetCurrentlyPlaying 	Retrieves the filename, details and status of the currently playing media.
+GetVolume 	Retrieves the current volume setting as a percentage of the maximum possible value.
+SetVolume(percent) 	Sets the volume as a percentage of the maximum possible.
+Mute 	Toggles the sound on/off.
+Pause 	Pauses the currently playing media.
+Stop 	Stops the currently playing media.
+PlayNext 	Starts playing/showing the next media/image in the current playlist or, if currently showing a slidshow, the slideshow playlist.
+PlayPrev 	Starts playing/showing the previous media/image in the current playlist or, if currently showing a slidshow, the slideshow playlist.
+Mute 	Toggles the sound on/off.
+SeekPercentage(percent) 	Sets the playing position of the currently playing media as a percentage of the media’s length.
+SeekPercentageRelative(relative-percentage) 	Adds/Subtracts the current percentage on to the current postion in the song
+GetPercentage 	Retrieves the current playing position of the currently playing media as a percentage of the media’s length.
+
+Below is a partial list of the commands for sending actions / keystrokes:
+
+Command 	Description 
+
+SendKey(256) 	Click on SELECT button
+SendKey(270) 	Click on UP button
+SendKey(271) 	Click on DOWN button
+SendKey(272) 	Click on LEFT button
+SendKey(273) 	Click on RIGHT button
+SendKey(275) 	Click on BACK button
+SendKey(<ASCII value + 61696>) 	Sends an ASCII key (used in keyboard)
+SendKey(61704) 	Sends an backspace key (used in keyboard)
+*/
+ 
+ 
+ 
+ 
+///////////////////////////// Parameters
+
+STRING_PARAMETER BoxeeIPAddr$[16];   //the ip of the boxee server.
+INTEGER_PARAMETER BoxeePort; //the boxee ip port, usually 8800
+
+
+/////////////////////////// Sockets
+TCP_CLIENT TCPClient[16384];
+
+////////////////// Global Variables
+string upCmd[2000], dnCmd[2000], ltCmd[2000], rtCmd[2000], okCmd[2000];
+STRING OUT$[1024];
+
+
+////////////// TCPIP Connection
+PUSH TCPIP_Connect
+{
+    SIGNED_INTEGER status;
+    status = SocketConnectClient (TCPClient, BoxeeIPAddr$, BoxeePort, 1);
+    if (status < 0)
+        Print("Error connecting socket to address %s on port  %d", 
+            BoxeeIPAddr$, BoxeePort);
+}
+
+RELEASE TCPIP_Connect
+{
+    SIGNED_INTEGER status;
+    status = SocketDisconnectClient (TCPClient);
+	if (status < 0)
+	    Print("Error disconnecting socket to address %s on port  %d", 
+	            BoxeeIPAddr$, BoxeePort);
+}
+
+SOCKETCONNECT TCPClient
+{
+    SIGNED_LONG_INTEGER PortNumber;
+    SIGNED_INTEGER LocalStatus;
+    STRING RemoteIPAddress[20];
+    STRING RequestedAddress[256];
+    TCPIP_Connected = 1;
+    LocalStatus = SocketGetAddressAsRequested(TCPClient, RequestedAddress);
+    if (LocalStatus < 0)
+        Print("Error getting remote ip address. %d\n", LocalStatus);
+    Print("OnConnect: Connect call to %s successful\n", RequestedAddress);
+    PortNumber = SocketGetPortNumber(TCPClient);
+    if (PortNumber < 0)
+        Print("Error getting client port number. %ld\n", PortNumber);
+    LocalStatus = SocketGetRemoteIPAddress(TCPClient, RemoteIPAddress);
+    if (LocalStatus < 0)
+        Print("Error getting remote ip address. %d\n", LocalStatus);
+    Print("OnConnect: Connected to port %ld on address %s\n", 
+                PortNumber, RemoteIPAddress);
+}
+
+SOCKETDISCONNECT TCPClient
+{
+    TCPIP_Connected = 0;
+    if (TCPIP_Connect)
+        Print("Socket disconnected remotely");
+    Else
+        Print("Local disconnect complete.");
+}
+
+SOCKETSTATUS TCPClient
+{
+    SIGNED_INTEGER Status;
+    Status = SocketGetStatus();
+    TCPIP_Status = Status;
+    Print("The SocketGetStatus returns:       %d\n", Status);
+    Print("The TCPClient.SocketStatus returns: %d\n", TCPClient.SocketStatus);
+}
+   
+   
+///////////// Boxee Commands
+push up
+{
+    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=SendKey(270)\n\n"); 
+	SocketSend(TCPClient, out$);
+}
+
+push dn
+{
+    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=SendKey(271)\n\n"); 
+	SocketSend(TCPClient, out$);
+}
+
+push lt
+{
+    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=SendKey(272)\n\n"); 
+	SocketSend(TCPClient, out$);
+}
+
+push rt
+{
+    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=SendKey(273)\n\n"); 
+	SocketSend(TCPClient, out$);
+}
+
+push ok
+{
+    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=SendKey(256)\n\n"); 
+	SocketSend(TCPClient, out$);
+}
+
+push back
+{
+    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=SendKey(275)\n\n"); 
+	SocketSend(TCPClient, out$);
+}
+
+push pause
+{
+    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=Pause\n\n"); 
+	SocketSend(TCPClient, out$);
+}
+
+push stop
+{
+    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=Stop\n\n"); 
+	SocketSend(TCPClient, out$);
+}
+
+push playNext
+{
+    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=PlayNext\n\n"); 
+	SocketSend(TCPClient, out$);
+}
+
+push playPrev
+{
+    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=PlayPrev\n\n"); 
+	SocketSend(TCPClient, out$);
+}   
+
+//////////////////////// Socket Function 
+
+SOCKETRECEIVE TCPClient
+{
+	String In$[16384];
+	String debugLocal[16384]; 
+    string debug[16384];
+	
+	In$ = Gather("\n",TCPClient.SocketRxBuf);
+	ClearBuffer(TCPClient.SocketRxBuf);
+    print("received something");
+	debug = left(in$,256);  
+	print ("from device: %s",debug);
+	      
+	      
+	//TODO: set feedback digital signals and get metadata parsed from the HTTP response, such as "Now Playing", etc      
+	If (Find("OK",In$,1) > 0)
+	{
+		trace("found OK");
+	}  
+}	
