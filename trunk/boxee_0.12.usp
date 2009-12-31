@@ -8,7 +8,6 @@ System Name: Boxee
 System Number: 0.1
 Programmer: TAM
 Comments:
-	
 	(c) 2009 Tom Miller    
 
 	This program is free software: you can redistribute it and/or modify
@@ -26,29 +25,47 @@ Comments:
 */
 
 /////////////////////Compiler Directives
-#PRINT_TO_TRACE
-#OUTPUT_SHIFT 5
+// #SYMBOL_NAME 
+// #HINT ""
+// #CATEGORY "" 
+// #DIGITAL_EXPAND 
+// #ANALOG_SERIAL_EXPAND 
+// #HELP_PDF_FILE ""
+// #DEFAULT_NONVOLATILE
+#OUTPUT_SHIFT 2
 #ENABLE_DYNAMIC
 #DEFAULT_VOLATILE
 #ENABLE_STACK_CHECKING
+#PRINT_TO_TRACE
 #ENABLE_TRACE
 
-
 /////////////// Inputs & Outputs
-DIGITAL_INPUT _SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_;
-DIGITAL_INPUT TCPIP_Connect;    //you must hold this high constantly for the module to work. Do not pulse it.
-digital_OUTPUT TCPIP_Connected;
+DIGITAL_INPUT _SKIP_,_SKIP_;
+
 ANALOG_OUTPUT TCPIP_Status;
-DIGITAL_INPUT  pause, stop, playNext, playPrev;
-digital_input up, dn, lt, rt, ok, back; 
+DIGITAL_INPUT  Pause, Stop, PlayNext, PlayPrev;
+digital_input Up, Dn, Lt, Rt, Ok, Back; 
 
-/*  DOCUMENTATION         
+digital_input Jump_Photo, Jump_Music,Jump_Movie, Jump_TV;
+digital_input Jump_APP, Jump_MenuPop, Jump_VidSet;
 
-http://xbmc.org/wiki/?title=WebServerHTTP-API
+digital_input Set_Broadcast, Get_CurrentlyPlaying;
+digital_input Monitor_Broadcast;
 
-http://xbmc.org/wiki/?title=The_Web_Interface
+String_input command_in[256];
+
+String_output CurrentCoverURL$;
+String_output CurrentPlayStatus$, CurrentVideoNo$, CurrentSongNo$, CurrentType$;
+String_output CurrentTitle$, CurrentTrack$, CurrentArtist$, CurrentAlbum$;
+String_output CurrentGenre$, CurrentDirector$;
+String_output CurrentPlotoutline$, CurrentPlot$, CurrentRating$;
+String_output CurrentYear$, CurrentThumb$;
+String_output CurrentTime$, CurrentDuration$, CurrentPercentage$;
+String_output CurrentResolution$;
+String_output CurrentFilename$, CurrentFilesize$, CurrentChanged$;
 
 
+/*  DOCUMENTATION
 Below is a partial list of the commands for media playback:
 
 Command 	Description 
@@ -80,9 +97,6 @@ SendKey(<ASCII value + 61696>) 	Sends an ASCII key (used in keyboard)
 SendKey(61704) 	Sends an backspace key (used in keyboard)
 */
  
- 
- 
- 
 ///////////////////////////// Parameters
 
 STRING_PARAMETER BoxeeIPAddr$[16];   //the ip of the boxee server.
@@ -91,150 +105,419 @@ INTEGER_PARAMETER BoxeePort; //the boxee ip port, usually 8800
 
 /////////////////////////// Sockets
 TCP_CLIENT TCPClient[16384];
+UDP_SOCKET UDPClient[1024];
 
 ////////////////// Global Variables
-string upCmd[2000], dnCmd[2000], ltCmd[2000], rtCmd[2000], okCmd[2000];
-STRING OUT$[1024];
+// string upCmd[2000], dnCmd[2000], ltCmd[2000], rtCmd[2000], okCmd[2000];
+STRING OUT$[1024], LastSent[1024];
 
+String CurrentPlayStatus[256], CurrentVideoNo[256], CurrentType[256];
+String CurrentTitle[256], CurrentGenre[256], CurrentDirector[256];
+String CurrentPlotoutline[256], CurrentPlot[256], CurrentRating[256];
+String CurrentYear[256], CurrentThumb[256], CurrentResolution[256];
+String CurrentTime[256], CurrentDuration[256], CurrentPercentage[256];
+String CurrentFilename[256], CurrentFilesize[256], CurrentChanged[256];
+String CurrentSongNo[256], CurrentTrack[256], CurrentArtist[256], CurrentAlbum[256];
 
 ////////////// TCPIP Connection
-PUSH TCPIP_Connect
-{
+
+SOCKETCONNECT TCPClient {
+	SocketSend(TCPClient, out$);
+	print("sent: %s",out$);
+	out$ = "";
+}
+
+SOCKETDISCONNECT TCPClient {
+	Print("Socket disconnected");
+}
+
+SOCKETSTATUS TCPClient {
+    TCPIP_Status = SocketGetStatus();
+}
+
+Signed_Integer_Function TCP_Connect(){
     SIGNED_INTEGER status;
-    status = SocketConnectClient (TCPClient, BoxeeIPAddr$, BoxeePort, 1);
-    if (status < 0)
-        Print("Error connecting socket to address %s on port  %d", 
-            BoxeeIPAddr$, BoxeePort);
+    status = SocketConnectClient (TCPClient, BoxeeIPAddr$, BoxeePort, 0);
+    if (status < 0){
+		Print("Error connecting socket to address %s port %d",BoxeeIPAddr$, BoxeePort);
+		print("status: %d",status);
+		status = SocketDisconnectClient(TCPClient);
+	    if (status < 0){
+			Print("Error disconnecting socket from %s port %d",BoxeeIPAddr$, BoxeePort);
+			print("status: %d",status);
+		}
+    }
+	Return (status);
 }
 
-RELEASE TCPIP_Connect
-{
-    SIGNED_INTEGER status;
-    status = SocketDisconnectClient (TCPClient);
-	if (status < 0)
-	    Print("Error disconnecting socket to address %s on port  %d", 
-	            BoxeeIPAddr$, BoxeePort);
+Function SendCommand(string command){
+	Signed_Integer status;
+	Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=%s\n\n",command); 
+	TCP_Connect();
+	LastSent = command;
+}
+ 
+// BOXEE COMMANDS //
+
+push up {
+	SendCommand("SendKey(270)");
 }
 
-SOCKETCONNECT TCPClient
-{
-    SIGNED_LONG_INTEGER PortNumber;
-    SIGNED_INTEGER LocalStatus;
-    STRING RemoteIPAddress[20];
-    STRING RequestedAddress[256];
-    TCPIP_Connected = 1;
-    LocalStatus = SocketGetAddressAsRequested(TCPClient, RequestedAddress);
-    if (LocalStatus < 0)
-        Print("Error getting remote ip address. %d\n", LocalStatus);
-    Print("OnConnect: Connect call to %s successful\n", RequestedAddress);
-    PortNumber = SocketGetPortNumber(TCPClient);
-    if (PortNumber < 0)
-        Print("Error getting client port number. %ld\n", PortNumber);
-    LocalStatus = SocketGetRemoteIPAddress(TCPClient, RemoteIPAddress);
-    if (LocalStatus < 0)
-        Print("Error getting remote ip address. %d\n", LocalStatus);
-    Print("OnConnect: Connected to port %ld on address %s\n", 
-                PortNumber, RemoteIPAddress);
+push dn {
+	SendCommand("SendKey(271)");
 }
 
-SOCKETDISCONNECT TCPClient
-{
-    TCPIP_Connected = 0;
-    if (TCPIP_Connect)
-        Print("Socket disconnected remotely");
-    Else
-        Print("Local disconnect complete.");
+push lt {
+	SendCommand("SendKey(272)"); 
 }
 
-SOCKETSTATUS TCPClient
-{
-    SIGNED_INTEGER Status;
-    Status = SocketGetStatus();
-    TCPIP_Status = Status;
-    Print("The SocketGetStatus returns:       %d\n", Status);
-    Print("The TCPClient.SocketStatus returns: %d\n", TCPClient.SocketStatus);
-}
-   
-   
-///////////// Boxee Commands
-push up
-{
-    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=SendKey(270)\n\n"); 
-	SocketSend(TCPClient, out$);
+push rt {
+	SendCommand("SendKey(273)"); 
 }
 
-push dn
-{
-    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=SendKey(271)\n\n"); 
-	SocketSend(TCPClient, out$);
+push ok {
+	SendCommand("SendKey(256)"); 
 }
 
-push lt
-{
-    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=SendKey(272)\n\n"); 
-	SocketSend(TCPClient, out$);
+push back {
+	SendCommand("SendKey(275)"); 
 }
 
-push rt
-{
-    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=SendKey(273)\n\n"); 
-	SocketSend(TCPClient, out$);
+push Pause {
+	SendCommand("Pause"); 
 }
 
-push ok
-{
-    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=SendKey(256)\n\n"); 
-	SocketSend(TCPClient, out$);
+push Stop {
+    SendCommand("Stop"); 
 }
 
-push back
-{
-    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=SendKey(275)\n\n"); 
-	SocketSend(TCPClient, out$);
+push PlayNext {
+    SendCommand("PlayNext"); 
 }
 
-push pause
-{
-    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=Pause\n\n"); 
-	SocketSend(TCPClient, out$);
-}
-
-push stop
-{
-    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=Stop\n\n"); 
-	SocketSend(TCPClient, out$);
-}
-
-push playNext
-{
-    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=PlayNext\n\n"); 
-	SocketSend(TCPClient, out$);
-}
-
-push playPrev
-{
-    Makestring(out$, "GET /xbmcCmds/xbmcHttp?command=PlayPrev\n\n"); 
-	SocketSend(TCPClient, out$);
+push PlayPrev {
+    SendCommand("PlayPrev"); 
 }   
 
-//////////////////////// Socket Function 
+push Set_Broadcast {
+	SendCommand("SetBroadcast(1;8278)");
+}
 
-SOCKETRECEIVE TCPClient
-{
-	String In$[16384];
-	String debugLocal[16384]; 
-    string debug[16384];
+push Monitor_Broadcast {
+	signed_integer status;
+
+	status = SocketUDP_Enable(UDPClient,BoxeeIPAddr$,8278);
+
+	print("UDP Socket status: %d",status);
+	if (status < 0) {
+	print("error listening on UDP Socket");
+	}
+}
+
+release Monitor_Broadcast {
+	signed_integer status;
+
+	status = SocketUDP_Disable(UDPClient);
+	if (status < 0) {
+	print("error releasing UDP Socket");
+	}
+
+}
+
+push Get_CurrentlyPlaying {
+	SendCommand("GetCurrentlyPlaying(special:\\xbmc\web\thumb.jpg;special:\\xbmc\web\nothing.jpg)");
+}
+
+push Jump_Photo {
+	SendCommand("ExecBuiltIn(ActivateWindow(10491))");
+}
+
+push Jump_Music {
+	SendCommand("ExecBuiltIn(ActivateWindow(10484))");
+}
+
+push Jump_Movie {
+	SendCommand("ExecBuiltIn(ActivateWindow(10481))");
+}
+
+push Jump_TV {
+	SendCommand("ExecBuiltIn(ActivateWindow(10480))");
+}
+
+push Jump_APP {
+	SendCommand("ExecBuiltIn(ActivateWindow(10482))");
+}
+
+push Jump_MenuPop {
+	SendCommand("ExecBuiltIn(ActivateWindow(10467))");
+}
+
+push Jump_VidSet {
+	SendCommand("ExecBuiltIn(ActivateWindow(10478))");
+} 
+
+change command_in{
+	SendCommand(command_in);
+}
+
+//////////////////////// FEEDBACK FROM BOXEE
+
+///// UDP
+SocketReceive UDPClient {
+	String in$[1024], debug[255];
+	Signed_integer isBroadcast, isMulticast, Status;
+	String SenderIP[32];
 	
-	In$ = Gather("\n",TCPClient.SocketRxBuf);
+	print("UDP received");
+	
+	in$ = UDPClient.SocketRxBuf;
+	ClearBuffer(UDPClient.SocketRxBuf);
+	
+//	debug = left(in$,255);
+//	print("%s",debug);
+	
+	If (find("MediaChanged:",in$)){
+		delay(50);
+		SendCommand("GetCurrentlyPlaying(special:\\xbmc\web\thumb.jpg;special:\\xbmc\web\nothing.jpg)");
+	}
+	Else if (find("OnPlayBackStopped",in$)){
+		delay(50);
+		SendCommand("GetCurrentlyPlaying(special:\\xbmc\web\thumb.jpg;special:\\xbmc\web\nothing.jpg)");	
+	}
+}
+
+///// TCP
+
+SOCKETRECEIVE TCPClient {
+	String In$[16384];
+    string debug[16384], debugPrint[16384];
+    integer start, end, length, i, debugInt;
+	
+	debug = TCPClient.SocketRxBuf;
+	
+	In$ = Gather("</html>",TCPClient.SocketRxBuf);
 	ClearBuffer(TCPClient.SocketRxBuf);
-    print("received something");
-	debug = left(in$,256);  
-	print ("from device: %s",debug);
-	      
-	      
-	//TODO: set feedback digital signals and get metadata parsed from the HTTP response, such as "Now Playing", etc      
-	If (Find("OK",In$,1) > 0)
-	{
-		trace("found OK");
+    
+	length = len(in$);
+	print("gathered length: %u",length);
+	
+	If (Find("OK",In$,1) > 0){
+		print("found OK");
+		
+		end = 1;
+		i = 1;
+
+		If (lastSent = "GetCurrentlyPlaying"){
+
+			makestring(CurrentCoverURL$,"http://%s:%u/thumb.jpg",BoxeeIPAddr$, BoxeePort);
+			
+			start = find("Filename:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 9);
+				If (end = 0) {
+					end = find("</html>",in$,start+9);
+				}
+				CurrentFilename = mid(in$, start + 9, end - start - 9);
+			}
+			Else { CurrentFilename = ""; }
+			print("CurrentFilename: %s",CurrentFilename);
+						
+			start = find("PlayStatus:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 11);
+				CurrentPlayStatus = mid(in$, start + 11, end - start - 11);
+			}
+			Else { CurrentPlayStatus = ""; }
+			print("CurrentPlayStatus: %s",CurrentPlayStatus);
+			
+			start = find("VideoNo:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 8);
+				CurrentVideoNo = mid(in$, start + 8, end - start - 8);
+			}
+			Else { CurrentVideoNo = ""; }			
+			print("CurrentVideoNo: %s", CurrentVideoNo);
+
+			start = find("SongNo:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 7);
+				CurrentSongNo = mid(in$, start + 7, end - start - 7);
+			}
+			Else { CurrentSongNo = ""; }			
+			print("CurrentSongNo: %s", CurrentSongNo);
+			
+			start = find("Type:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 5);
+				CurrentType = mid(in$, start + 5, end - start - 5);
+			}
+			Else { CurrentType = ""; }			
+			print("CurrentType: %s", CurrentType);
+
+            start = find("Resolution:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 11);
+				CurrentResolution = mid(in$, start + 11, end - start - 11);
+			}
+			Else { CurrentResolution = ""; }			
+			print("CurrentResolution: %s", CurrentResolution);
+			
+			start = find("Title:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 6);
+				CurrentTitle = mid(in$, start + 6, end - start - 6);
+			}
+			Else { CurrentTitle = ""; }			
+			print("CurrentTitle: %s", CurrentTitle);
+
+			start = find("Track:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 6);
+				CurrentTrack = mid(in$, start + 6, end - start - 6);
+			}
+			Else { CurrentTrack = ""; }			
+			print("CurrentTrack: %s", CurrentTrack);
+
+			start = find("Artist:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 7);
+				CurrentArtist = mid(in$, start + 7, end - start - 7);
+			}
+			Else { CurrentArtist = ""; }			
+			print("CurrentArtist: %s", CurrentTitle);
+
+			start = find("Album:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 6);
+				CurrentAlbum = mid(in$, start + 6, end - start - 6);
+			}
+			Else { CurrentAlbum = ""; }			
+			print("CurrentAlbum: %s", CurrentAlbum);
+
+			start = find("Genre:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 6);
+				CurrentGenre = mid(in$, start + 6, end - start - 6);
+			}
+			Else { CurrentGenre = ""; }			
+			print("CurrentGenre: %s", CurrentGenre);
+
+			start = find("Director:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 9);
+				CurrentDirector = mid(in$, start + 9, end - start - 9);
+			}
+			Else { CurrentDirector = ""; }			
+			print("CurrentDirector: %s", CurrentDirector);
+
+			start = find("Plotoutline:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 12);
+				CurrentPlotoutline = mid(in$, start + 12, end - start - 12);
+			}
+			Else { CurrentPlotoutline = ""; }			
+			print("CurrentPlotoutline: %s", CurrentPlotoutline);
+
+			start = find("Plot:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 5);
+				CurrentPlot = mid(in$, start + 5, end - start - 5);
+			}
+			Else { CurrentPlot = ""; }			
+			print("CurrentPlot: %s", CurrentPlot);
+
+			start = find("Rating:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 7);
+				CurrentRating = mid(in$, start + 7, end - start - 7);
+			}
+			Else { CurrentRating = ""; }			
+			print("CurrentRating: %s", CurrentRating);
+
+			start = find("Year:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 5);
+				CurrentYear = mid(in$, start + 5, end - start - 5);
+			}
+			Else { CurrentYear = ""; }			
+			print("CurrentYear: %s", CurrentYear);
+
+			start = find("Thumb:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 6);
+				CurrentThumb = mid(in$, start + 6, end - start - 6);
+			}
+			Else { CurrentThumb = ""; }			
+			print("CurrentThumb: %s", CurrentThumb);
+
+			start = find("Time:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 5);
+				CurrentTime = mid(in$, start + 5, end - start - 5);
+			}
+			Else { CurrentTime = ""; }			
+			print("CurrentTime: %s", CurrentTime);
+
+			start = find("Duration:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 9);
+				CurrentDuration = mid(in$, start + 9, end - start - 9);
+			}
+			Else { CurrentDuration = ""; }			
+			print("CurrentDuration: %s", CurrentDuration);
+
+			start = find("Percentage:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 11);
+				CurrentPercentage = mid(in$, start + 11, end - start - 11);
+			}
+			Else { CurrentPercentage = ""; }			
+			print("CurrentPercentage: %s", CurrentPercentage);
+
+			start = find("File size:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 10);
+				CurrentFilesize = mid(in$, start + 10, end - start - 10);
+			}
+			Else { CurrentFilesize = ""; }			
+			print("CurrentFilesize: %s", CurrentFilesize);
+
+			start = find("Changed:",in$,end);
+			If (start > 0){
+				end = find("\x0A",in$,start + 8);
+				If (end = 0) {
+					end = find("</html>",in$,start+8);
+				}
+				CurrentChanged = mid(in$, start + 8, end - start - 8);
+			}
+			Else { CurrentChanged = ""; }
+			print("CurrentChanged: %s", CurrentChanged);
+
+			CurrentPlayStatus$ = left(CurrentPlayStatus,255);
+			CurrentVideoNo$ = left(CurrentVideoNo,255);
+			CurrentSongNo$ = left(CurrentSongNo,255);
+			CurrentType$ = left(CurrentType,255);
+			CurrentTitle$ = left(CurrentTitle,255);
+			CurrentArtist$ = left(CurrentArtist,255);
+			CurrentAlbum$ = left(CurrentAlbum,255);
+			CurrentGenre$ = left(CurrentGenre,255);
+			CurrentDirector$ = left(CurrentDirector,255);
+			CurrentPlotoutline$ = left(CurrentPlotoutline,255);
+			CurrentPlot$ = left(CurrentPlot,255);
+			CurrentRating$ = left(CurrentRating,255);
+			CurrentYear$ = left(CurrentYear,255); 
+			CurrentThumb$ = left(CurrentThumb,255);
+			CurrentTime$ = left(CurrentTime,255);
+			CurrentDuration$ = left(CurrentDuration,255); 
+			CurrentPercentage$ = left(CurrentPercentage,255);
+			CurrentFilename$ = left(CurrentFilename,255); 
+			CurrentFilesize$ = left(CurrentFilesize,255);
+			CurrentResolution$ = left(CurrentResolution,255);
+			CurrentChanged$ = left(CurrentChanged,255);
+		}
 	}  
 }	
+///////////// Initialization script
+Function Main(){                            
+	SendCommand("SetBroadcast(1;8278)");
+}
